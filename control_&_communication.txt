@@ -1,0 +1,284 @@
+//Class pour les Flow Meter
+//Il faut lui assigner une pin
+//Contient une fonction qui renvoit la valeur lu sur la pin (HIGH ou LOW)
+class flow{
+  
+  //Variable privé de la classe
+  int Flowpin; //Numero de la pin
+     
+  //Constructeur - Flow
+ public : 
+  flow(int pin){
+    Flowpin = pin;
+     pinMode(Flowpin, INPUT);  
+    }
+  int update(void){
+    int val; //valeur du digital read
+    
+    val=digitalRead(Flowpin);
+        
+    return val;    
+  }
+};
+
+//Class pour les valves
+//Il faut lui assigner une pin
+//Contient une fonction qui renvoit la valeur lu sur la pin (HIGH ou LOW)
+class valve {
+
+      int ValvePin;   //numero de la pin
+      int On;        //état de la valve
+      int valvestate; //maintient l'état
+      
+ //constructeur - Valve
+  public : 
+  valve(int pin){
+    ValvePin = pin;
+    pinMode(ValvePin, OUTPUT);
+    valvestate = LOW; 
+  }
+   void update(int etat){
+    On = etat;
+    if((valvestate == HIGH) && (On==0)){
+      valvestate = LOW;                    //éteint la valve
+      digitalWrite(ValvePin,valvestate);  //Update la valve
+      }
+    else if((valvestate == LOW) && (On==1)){
+       valvestate = HIGH;                 //allume la valve
+       digitalWrite(ValvePin,valvestate); //Update la valve
+      }
+    } 
+};
+
+//Class pour les pompes
+//Il faut lui assigner une pin
+//Contient une fonction qui renvoit la valeur lu sur la pin (HIGH ou LOW)
+class pump {
+
+      int PumpPin;   //numero de la pin
+      int On;       //etat de la pompe
+      int pumpstate; //maintient l'état de la pompe
+      
+ //constructeur - pompe
+  public : 
+  pump(int pin){
+    PumpPin = pin;
+    pinMode(PumpPin, OUTPUT);  
+    pumpstate = LOW; 
+  }
+  void update(int etat){
+    On=etat;
+    if( (pumpstate == HIGH) && (On==0)){
+      pumpstate = LOW;                   //éteind
+      digitalWrite(PumpPin,pumpstate);  //Update la pompe
+      }
+    else if((pumpstate == LOW) && (On==1)){
+       pumpstate = HIGH;                 //allume
+       digitalWrite(PumpPin,pumpstate); //Update la pompe
+      }
+    } 
+  int state(void){
+    int etat = 1;
+    if(pumpstate == LOW)
+      etat = 0;
+    return etat;
+  }
+};
+
+//================================================================
+//                        FIN DES CLASSES
+//================================================================
+
+//=====================CONSTANTE DE COMMUNICATION=================
+
+#define ingredient B00000000                       //C'EST @ POUR TESTER CAR PAS DE CARACTERE POUR 0x00
+#define fin_versement B00000001
+#define acknowledge B00001111                     // id_ack
+#define start_byte B11111110                       //FE ou  þ
+
+//================================================================
+//==========================CONSTANTE UTILE=======================
+#define libre 0                                    //Position du bit pour le statebyte
+#define paiement 1                                
+#define verre_present 2
+#define master_enable 3
+#define ID_LOC 0
+#define STATE_LOC 1
+#define LENGHT_LOC 2
+#define PAYLOAD_LOC 3
+#define TEST B11111110 
+//================================================================
+//================VALEUR DE CALIBRATION POUR LES FLOWS============
+#define valeur_flow1 1.75  //2.35 //1.19
+#define valeur_flow2 1.515   //2.8
+//================================================================
+
+void setup() {
+                                                // Ouvre la communication serial
+  Serial.begin(9600);
+  while (!Serial) {
+    ;                                           // attend que le port serial se connect. Besoin pour native USB port
+  }                                                  
+}
+//==========APPEL DES CLASSES (PIN ASSIGNATION)==================
+  pump pump1(13);      // appel de class
+  pump pump2(12);
+  flow flow1(11);
+  flow flow2(10);
+  valve valve1(9);
+  valve valve2 (8);
+//==============================================================
+
+void loop() {
+  
+//Déclaration de variables                              
+uint8_t BYTEin[12];                           //Tableau pour la communication serial
+uint8_t byteTEST;                             //Variable de test pour le serial
+
+ //lis un byte à la fois pour identifier si on recoit le start_byte
+ if (Serial.available () > 0){   
+    byteTEST = Serial.read();
+     
+   delay(10);
+   
+    
+  }
+
+//Indique si le reste doit être lu et conservé
+ if (byteTEST == start_byte) {                              
+   for(int j=0;j<10;j++){
+     BYTEin[j] = Serial.read();   
+     delay(1); }
+    //readBYTE(BYTEin);                  //Fonction qui lis les bytes suivants               
+    // affiche_byte (BYTEin); //**** Seulement pour test
+
+// Confirmation recu et validé pour le versement
+  if ((confirm_state(BYTEin)) && (BYTEin[0] == ingredient)){  
+        //Envoie la confirmation qu'il a recu ses ingrédients/quantités
+        send_acknowledge();
+       //Fonction du versage
+        versage(BYTEin);
+    }    
+  } 
+}
+
+//Lis chaque byte du message et le met dans un tableau pour qu'il soit bien séparé
+//Il recoit le serial (ici le signal avec un nombre de byte)
+void readBYTE (uint8_t BYTEin[]){
+  
+  int lenght = 7;
+  
+  for(int i=0;i<lenght;i++){
+   if (Serial.available () > 0){  
+    BYTEin[i]= Serial.read();
+    delay(10);
+    if (BYTEin[2] == B00001010)
+      lenght = 10;
+    }
+  } 
+}
+
+//FONCTION DE TEST
+//Affiche tout les byte recu après le start_byte
+//Recois le tableau remplis de byte suivant le start_byte
+ void affiche_byte (uint8_t BYTEin[]){
+  int i = 0;
+  int a = 10;
+  while (i != a){
+    Serial.print ("  byte lu est : ");
+    Serial.write(BYTEin[i]);
+    Serial.println();
+    i ++;}
+}
+
+//Fonction qui confirme les states
+//Pour valider si on peut verser et que tout les requis sont respectés
+//Master enable + le paiement + le verre présent
+int confirm_state(uint8_t BYTEin[]){
+  int confirm =0;
+  int x = BYTEin[1];    //  on va lire le state !
+     if(bitRead(x,master_enable)){               //  bit read ( la byte,  la position 0 a 7 ) retourne la valeur     
+       if(bitRead(x,verre_present)){
+         if(bitRead(x,paiement))
+           confirm = 1;
+      }
+    }
+  return confirm; 
+}
+  
+//Fonctin qui envoie l'accusé de réception au Raspberry pi
+//Envoie la confirmation avec le start_byte
+void send_acknowledge (){
+    Serial.write(start_byte);
+}
+//Fonction qui envoie la confirmation  de fin de versement
+void send_fin_versage (){
+    Serial.write(fin_versement);
+}
+
+void versage (uint8_t BYTEin[]){   //    þ
+ //Déclaration de variables
+  double flow_count1 = 0;
+  double flow_count2 = 0;
+  int nb_ingrediant = BYTEin[3];
+  double limite_flow1 = BYTEin[5] << 8 | BYTEin[6];   //   met 2 byte dans un int
+  double limite_flow2 = BYTEin[8] << 8 | BYTEin[9];
+  int position1 = BYTEin[4];
+  int position2 = BYTEin[7];
+  int temp1 = 0;
+  int temp2 = 0;
+  int flag1 = !flow1.update();
+  int flag2 = !flow2.update();
+  int fin = 0;
+
+    
+  // activie les pompes
+  pump1.update(1);
+  pump2.update(1);
+  valve1.update(1);
+  valve2.update(1);
+
+//====================================================   
+while (fin != 1){
+  Serial.print ("  1 : ");
+   Serial.print(flow_count1,5);
+   Serial.print ("  2 : ");
+   Serial.print(flow_count2,5);
+  temp1 = flow1.update();
+  if (temp1==1 && flag1 ==0){
+    flow_count1 = flow_count1 + valeur_flow1 ;
+    flag1 = !flag1;
+  }
+  else if(temp1==0 && flag1 ==1){
+    flag1=!flag1;
+    flow_count1 = flow_count1 + valeur_flow1 ;
+  }
+//====================================================   
+  temp2 = flow2.update();
+  if (temp2==1 && flag2 ==0){
+    flow_count2 = flow_count2 + valeur_flow2 ;
+    flag2 = !flag2;
+  }
+  else if(temp2==0 && flag2 ==1){
+    flow_count2 = flow_count2 + valeur_flow2 ;
+    flag2=!flag2;
+  }
+//====================================================   
+  if (flow_count1 >= limite_flow1){
+    pump1.update(0);
+    valve1.update(0);
+    Serial.println("je ferme la 1");
+    }
+  if (flow_count2 >= limite_flow2){
+    pump2.update(0);
+    valve2.update(0);
+    Serial.println("je ferme la 2");
+    }
+ if ( (flow_count1 >= limite_flow1)and (flow_count2 >= limite_flow2) ){    // þ
+  fin = !fin;
+  Serial.println("je sors");
+  }  
+}
+
+  
+  }
